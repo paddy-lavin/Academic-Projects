@@ -1,0 +1,756 @@
+---
+title: "Modeling Spatial Expected Points Allowed by NBA Defenses"
+author: "STAT479 Group 28: Paddy Lavin, Owen Klabough, Barnabás Valkó, Steven Yang"
+format: 
+  revealjs:
+    slide-level: 2
+    theme: moon        
+    logo: https://brand.wisc.edu/content/uploads/2023/09/hor-w-crest-logo-print-color-resource.png    
+    code-fold: true
+    chalkboard: true 
+mainfont: Helvetica
+execute:
+  cache: true
+  echo: false
+  message: false
+  warning: false
+---
+
+
+```{r}
+#| label: full-data-setup
+#| include: false
+#| echo: false
+#| message: false
+#| warning: false
+
+#rm(list = ls())
+
+library(hoopR)
+library(tidyverse)
+library(mgcv)
+library(tidyr)
+library(gridExtra)
+library(kableExtra) 
+
+nba_pbp <- hoopR::load_nba_pbp(seasons = 2024)
+
+shot_data <- nba_pbp %>%
+    filter(shooting_play == TRUE) %>%
+    mutate(
+      defensive_team_name = ifelse(team_id == home_team_id,
+                                   away_team_name_alt,
+                                   home_team_name_alt),
+      shot_distance = as.numeric(str_extract(text, "(\\d+)-foot", group = 1))
+    ) %>%
+    filter(is.na(shot_distance) | shot_distance < 50) %>%
+    select(coordinate_x, coordinate_y, score_value, defensive_team_name) %>%
+    filter(!is.na(coordinate_x) & !is.na(coordinate_y) &
+             !is.na(defensive_team_name) & defensive_team_name != "Eastern Conf" & defensive_team_name != "Western Conf")
+
+  shot_data_gam <- shot_data %>%
+    mutate(
+      x_coord_abs = abs(coordinate_x),
+      y_coord = coordinate_y
+    )
+
+
+league_avg_gam <- gam(score_value ~ s(x_coord_abs, y_coord, k = 50),
+                      data = shot_data_gam)
+
+pred_grid <- expand.grid(
+  x_coord_abs = seq(0, 47, by = 0.5),
+  y_coord = seq(-25, 25, by = 0.5)
+)
+
+pred_grid_with_league_avg <- pred_grid %>%
+  mutate(league_avg_epx_gam = predict(league_avg_gam, newdata = .,
+                                      newdata.guaranteed = TRUE))
+
+nba_pbp_2002 <- hoopR::load_nba_pbp(seasons = 2002)
+
+shot_data_2002 <- nba_pbp_2002 %>%
+  filter(shooting_play == TRUE) %>%
+  mutate(
+    defensive_team_name = ifelse(
+      team_id == home_team_id, away_team_name_alt, home_team_name_alt
+    ),
+    x_coord_abs = abs(coordinate_x),
+    y_coord = coordinate_y
+  ) %>%
+  select(x_coord_abs, y_coord, score_value, defensive_team_name) %>%
+  filter(!is.na(x_coord_abs) & !is.na(y_coord) &
+         !is.na(defensive_team_name))
+
+league_avg_gam_2002 <- gam(score_value ~ s(x_coord_abs, y_coord, k = 50),
+                           data = shot_data_2002)
+
+pred_grid_2002 <- pred_grid %>%
+  mutate(league_avg_epx_2002 = predict(league_avg_gam_2002, newdata = .))
+
+
+team_gam_models <- shot_data_gam %>%
+  group_by(defensive_team_name) %>%
+  nest() %>%
+  mutate(
+    model = map(data, ~ gam(score_value ~ s(x_coord_abs, y_coord, k = 50),
+                            data = .x))
+  )
+
+team_predictions <- team_gam_models %>%
+  mutate(
+    predictions_with_grid = map(model, ~ {
+      pred_grid %>%
+        mutate(team_predicted_epx = predict(.x, newdata = .,
+                                            newdata.guaranteed = TRUE))
+    })
+  ) %>%
+  select(defensive_team_name, predictions_with_grid) %>%
+  unnest(cols = c(predictions_with_grid))
+
+comparison_data <- team_predictions %>%
+  left_join(pred_grid_with_league_avg, by = c("x_coord_abs", "y_coord")) %>%
+  mutate(epx_diff = team_predicted_epx - league_avg_epx_gam)
+
+# Constants
+hoop_center_x <- 0
+hoop_center_y <- 41.75
+hoop_radius <- 1.25 
+ft_circle_center_y <- 28.00
+ft_circle_radius <- 6
+restricted_arc_radius <- 4
+tp_arc_radius <- 23.75
+tp_corner_x <- 22.0
+y_intersect <- hoop_center_y - sqrt(tp_arc_radius^2 - tp_corner_x^2)
+
+# Hoop
+hoop_data <- data.frame(angle = seq(0, 2 * pi, length.out = 100))
+hoop_data$x <- hoop_center_x + hoop_radius * cos(hoop_data$angle)
+hoop_data$y <- hoop_center_y + 2 + hoop_radius * sin(hoop_data$angle) 
+
+# FT Circle 
+ft_arc_data <- data.frame(angle = seq(pi, 2 * pi, length.out = 100))
+ft_arc_data$x <- hoop_center_x + ft_circle_radius * cos(ft_arc_data$angle)
+ft_arc_data$y <- ft_circle_center_y + ft_circle_radius * sin(ft_arc_data$angle)
+
+# Restricted Arc
+restricted_arc_data <- data.frame(angle = seq(pi, 2 * pi, length.out = 100))
+restricted_arc_data$x <- hoop_center_x + restricted_arc_radius * cos(restricted_arc_data$angle)
+restricted_arc_data$y <- hoop_center_y+1 + restricted_arc_radius * sin(restricted_arc_data$angle)
+
+# 3pt Arc
+angle_left <- atan2(y = y_intersect - hoop_center_y, x = -tp_corner_x)
+angle_right <- atan2(y = y_intersect - hoop_center_y, x = tp_corner_x)
+three_point_arc_data <- data.frame(angle = seq(angle_left, angle_right, length.out = 100))
+three_point_arc_data$x <- hoop_center_x + tp_arc_radius * cos(three_point_arc_data$angle)
+three_point_arc_data$y <- hoop_center_y + tp_arc_radius * sin(three_point_arc_data$angle)
+
+court_line_color <- "gray16"
+court_line_width <- 0.75
+
+court_landmarks <- list(
+  annotate("segment", x = -8, y = 28.00, xend = -8, yend = 47,
+           color = court_line_color, linewidth = court_line_width), # Left lane
+  annotate("segment", x = 8, y = 28.00, xend = 8, yend = 47,
+           color = court_line_color, linewidth = court_line_width), # Right lane
+  annotate("segment", x = -8, y = 28.00, xend = 8, yend = 28.00,
+           color = court_line_color, linewidth = court_line_width), # FT line
+  annotate("segment", x = -4, y = 45.00, xend = 4, yend = 45.00,
+           color = court_line_color, linewidth = court_line_width), # Backboard
+  annotate("segment", x = -22, y = 47, xend = -22, yend = y_intersect - 0.08,
+           color = court_line_color, linewidth = court_line_width), # Left 3pt corner
+  annotate("segment", x = 22, y = 47, xend = 22, yend = y_intersect - 0.08,
+           color = court_line_color, linewidth = court_line_width), # Right 3pt corner
+  
+  geom_path(data = hoop_data, aes(x = x, y = y),
+            color = court_line_color, linewidth = court_line_width, inherit.aes = FALSE),
+  geom_path(data = ft_arc_data, aes(x = x, y = y),
+            color = court_line_color, linewidth = court_line_width, inherit.aes = FALSE),
+  geom_path(data = restricted_arc_data, aes(x = x, y = y),
+            color = court_line_color, linewidth = court_line_width, inherit.aes = FALSE),
+  geom_path(data = three_point_arc_data, aes(x = x, y = y),
+            color = court_line_color, linewidth = court_line_width, inherit.aes = FALSE)
+)
+
+
+# Helper function to define zones (REVISED)
+define_zones <- function(data) {
+  mutate(
+    data,
+    dist_from_hoop = sqrt(y_coord^2 + (x_coord_abs - hoop_center_y)^2),
+    
+    zone_rim = dist_from_hoop <= 5,
+    is_in_paint = abs(y_coord) <= 8 & x_coord_abs >= 28,
+    
+    is_3pt_shot = y_coord > 22 | y_coord < -22 | dist_from_hoop > 23.75,
+    
+    is_midrange_shot = !is_3pt_shot & !zone_rim & !is_in_paint,
+    
+    is_corner_3 = is_3pt_shot & x_coord_abs > y_intersect,
+    
+    is_arc_3_area = is_3pt_shot & x_coord_abs > 20 & ((x_coord_abs < y_intersect & y_coord > 8) | (x_coord_abs < y_intersect & y_coord < -8)),
+    
+    # Split all zones Left/Right for the final columns
+    zone_l_corner_3 = is_corner_3 & y_coord < 0,
+    zone_r_corner_3 = is_corner_3 & y_coord > 0,
+    
+    zone_l_wing_3 = is_arc_3_area & y_coord < 0,
+    zone_r_wing_3 = is_arc_3_area & y_coord > 0,
+    
+    zone_l_midrange = is_midrange_shot & y_coord < 0,
+    zone_r_midrange = is_midrange_shot & y_coord > 0,
+    
+    zone_parking_lot = dist_from_hoop > 35
+  )
+}
+
+# Define zones on the league-average grid
+pred_grid_with_league_avg_zones <- define_zones(pred_grid_with_league_avg)
+
+# Define zones on the main comparison_data
+comparison_data_with_zones <- define_zones(comparison_data)
+```
+
+## Introduction: Beyond the Box Score
+
+::: {.incremental}
+- There are a great number of stats to measure offense in basketball, but not for defense
+- Traditional counting stats like steals and blocks are rare and do not reflect true defensive ability
+- Defensive metrics often ignore [**spatial context**]{style="color:#DAB1DA"}
+:::
+
+. . . 
+
+### Our Goal
+To create a metric for analyzing team defensive efficiency that takes into account the location of shots taken.
+
+
+
+## Our Approach
+
+We'll use a [**Generalized Additive Model (GAM):**]{style="color:#DAB1DA"}
+
+. . . 
+
+::: {.incremental}
+- Smooths over the variance seen in binning to provide a **continuous surface** of expected points per shot taken.
+    
+- Less susceptible to noise, captures the broad spatial trends of a defense.
+:::
+
+. . . 
+
+We can use GAMs to create a new metric, [**EPx**]{style="color:#DAB1DA"}, representing the [**E**]{style="color:#DAB1DA"}xpected [**P**]{style="color:#DAB1DA"}oints a defense allows per shot taken at a point `x`.
+
+## The Code
+
+We use the [**mgcv**]{style="color:#DAB1DA"} package in `R` to fit our GAMs based on the `score_value` (0, 2, or 3) of any shot taken as a function of its `x` and `y` coordinates on the half court. We use play-by-play data accessed via [**hoopR**]{style="color:#DAB1DA"}:
+
+
+```{r}
+#| label: show-gam-function
+#| echo: true
+#| eval: false
+#| code-line-numbers: "1,2|4,5,6|1,2,3,4,5,6"
+shot_data <- hoopR::load_nba_pbp(seasons = 2024) %>%
+    filter(shooting_play == TRUE)
+
+league_avg_gam <- gam(
+          score_value ~ s(coordinate_x_raw, abs(coordinate_y_raw)),
+          data = shot_data)
+```
+
+. . . 
+
+Using this GAM, we can create a heatmap for the league-average [**EPx**]{style="color:#DAB1DA"} at any location on the court.
+
+
+
+## League Average Plot (2023-24)
+
+```{r}
+#| label: plot-league-heatmap-final
+#| fig-cap: "2023-24 League-Average EPx heatmap. Yellow: most efficient, Purple: least efficient"
+#| fig-height: 8.01
+
+ggplot(pred_grid_with_league_avg, aes(x = y_coord, y = x_coord_abs)) +
+  geom_raster(aes(fill = league_avg_epx_gam)) +
+  scale_fill_viridis_c(
+    name = "League Avg EPx",
+    option = "plasma",
+    limits = c(0, 2)
+  ) +
+  coord_cartesian(xlim = c(-25, 25), ylim = c(0, 47), expand = FALSE) +
+  
+  court_landmarks +
+
+  labs(
+    title = "League-Average EPx Heatmap (GAM)",
+    subtitle = "2023-24 NBA Season",
+    x = "Distance from Centerline (ft)",
+    y = "Distance from Half-court (ft)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 8),
+    panel.grid = element_blank()
+  )
+```
+
+
+## Historical Comparison Plots: 2024 vs. 2002
+
+::::: {.columns}
+
+:::: {.column}
+**2023-24 Season**
+```{r}
+#| label: plot-2024-comparison
+#| fig-width: 9
+#| fig-height: 7.501
+
+ggplot(pred_grid_with_league_avg, aes(x = y_coord, y = x_coord_abs)) +
+  geom_raster(aes(fill = league_avg_epx_gam)) +
+  scale_fill_viridis_c(
+    name = "League Avg EPx",
+    option = "plasma",
+    limits = c(0, 2)
+  )  +
+  coord_cartesian(xlim = c(-25, 25), ylim = c(0, 47), expand = FALSE) +
+  court_landmarks +
+  labs(
+    title = "2023-24 Season",
+    x = "Distance from Centerline (ft)",
+    y = "Distance from Half-court (ft)"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 8), panel.grid = element_blank())
+```
+::::
+
+:::: {.column}
+**2001-02 Season**
+```{r}
+#| label: plot-2002-comparison
+#| fig-width: 9
+#| fig-height: 7.501
+ggplot(pred_grid_2002, aes(x = y_coord, y = x_coord_abs)) +
+  geom_raster(aes(fill = league_avg_epx_2002)) +
+  scale_fill_viridis_c(
+    name = "League Avg EPx",
+    option = "plasma",
+    limits = c(0, 2)
+  ) +
+  coord_cartesian(xlim = c(-25, 25), ylim = c(0, 47), expand = FALSE) +
+  court_landmarks +
+  labs(
+    title = "2001-02 Season",
+    x = "Distance from Centerline (ft)",
+    y = "Distance from Half-court (ft)"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 8), panel.grid = element_blank())
+```
+::::
+
+:::::
+
+Were offenses worse or defenses better in 2001-02?
+
+
+## Team-by-Team Comparisons
+We can also create [**Comparison GAMs**]{style="color:#DAB1DA"} by running a model for each team defense in the NBA, and then *subtracting* the league average from each team's map.
+
+. . .
+
+* **[Red]{style="color:lightcoral"} = Worse than Avg. Defense** (Vulnerable Area)
+* **[Blue]{style="color:lightblue"} = Better than Avg. Defense** (Strong Area)
+
+. . .
+
+These heatmaps are useful for seeing at a glance where a team has weaker than league average defense.
+
+## Team-by-Team Comparison Heatmaps
+
+```{r}
+#| label: plot-team-difference-charts
+#| fig-height: 5
+#| fig-width: 12.01
+#| layout-ncol: 1
+
+teams_to_show <- c("Houston", "Milwaukee", "Dallas")
+
+ggplot(comparison_data %>% filter(defensive_team_name %in% teams_to_show), 
+       aes(x = y_coord, y = x_coord_abs)) +
+  geom_raster(aes(fill = epx_diff)) +
+  scale_fill_gradient2(
+    name = "EPx vs. Avg",
+    low = "blue",          
+    mid = "white",       
+    high = "red",          
+    midpoint = 0.001
+  ) +
+  coord_cartesian(xlim = c(-25, 25), ylim = c(0, 47), expand = FALSE) +
+  court_landmarks +
+  facet_wrap(~ defensive_team_name, ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Comparison GAMs (Team EPx - League EPx) for Dallas, Houston, and Milwaukee in 2023-24",
+    x = "Distance from Centerline (ft)",
+    y = "Distance from Half-court (ft)"
+  ) +
+  theme(
+    axis.text = element_text(size = 6),
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold", size = 10),
+    legend.position = "bottom"
+  )
+```
+ ([**Red**]{style="color:lightcoral"} = Vulnerable Area, [**Blue**]{style="color:lightblue"} = Strong Area.)
+
+
+## Zonal Analysis
+
+::::: {.columns}
+
+:::: {.column width="50%"}
+
+Let us define a number of specific zones on the court to compare defenses on:
+
+::: {.incremental}
+- [Around the rim]{style="color:#F781BF"}
+
+- [Left]{style="color:#E41A1C"}/[Right]{style="color:#FF7F00"} Corner 3s
+
+- [Left]{style="color:#4DAF4A"}/[Right]{style="color:#A65628"} Wing 3s
+
+- [Left]{style="color:#377EB8"}/[Right]{style="color:#FFFF33"} Midranges
+
+- [The Parking Lot]{style="color:#984EA3"}
+:::
+
+::::
+
+:::: {.column width="50%"}
+
+
+
+```{r}
+#| label: plot-zone-tester
+#| fig-cap: "Gray areas are not assigned to a zone."
+#| fig-height: 8.65
+#| echo: false
+#| message: false
+#| warning: false
+
+# 1. Create the single 'Zone' factor variable for plotting
+# This uses the output of your 'define_zones' function
+plot_data_zones <- pred_grid_with_league_avg_zones %>%
+  mutate(Zone = case_when(
+    zone_rim ~ "Rim",
+    zone_l_corner_3 ~ "L Corner 3",
+    zone_r_corner_3 ~ "R Corner 3",
+    zone_l_wing_3 ~ "L Wing 3",
+    zone_r_wing_3 ~ "R Wing 3",
+    zone_l_midrange ~ "L Midrange",
+    zone_r_midrange ~ "R Midrange",
+    zone_parking_lot ~ "Parking Lot"
+  ))
+
+# 2. Create the plot
+ggplot(plot_data_zones, aes(x = y_coord, y = x_coord_abs)) +
+  # Plot the zones as a raster
+  geom_raster(aes(fill = Zone)) +
+  
+  # Set court dimensions
+  coord_cartesian(xlim = c(-25, 25), ylim = c(0, 47), expand = FALSE) +
+  
+  # Add the court lines (defined in setup)
+  court_landmarks +
+  
+  # Use a color palette with distinct colors and make NAs grey
+  scale_fill_brewer(palette = "Set1", na.value = "grey80") +
+  
+  # Add labels
+  labs(
+    title = "Zone Definition Plot",
+    x = "Distance from Centerline (ft)",
+    y = "Distance from Half-court (ft)",
+    fill = "Zone"
+  ) +
+  
+  # Clean up the theme
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 8),
+    panel.grid = element_blank()
+  )
+```
+::::
+
+:::::
+
+
+
+
+
+## Zonal Analysis (cont.)
+
+Now let us take a look at the `Team EPx - League EPx` for our defined zones.
+
+Note that `Team EPx - League EPx` being a negative value means a team allows that many fewer points on average per shot taken in the zone!
+
+## Zonal Analysis Table
+
+```{r}
+#| label: zone-summary-table
+#| echo: false
+#| layout-nrow: 1
+#| message: false
+#| warning: false
+
+league_summary <- pred_grid_with_league_avg_zones %>%
+  summarize(
+    Rim = mean(league_avg_epx_gam[zone_rim], na.rm = TRUE),
+    `L Corner 3` = mean(league_avg_epx_gam[zone_l_corner_3], na.rm = TRUE),
+    `R Corner 3` = mean(league_avg_epx_gam[zone_r_corner_3], na.rm = TRUE),
+    `L Wing 3` = mean(league_avg_epx_gam[zone_l_wing_3], na.rm = TRUE),
+    `R Wing 3` = mean(league_avg_epx_gam[zone_r_wing_3], na.rm = TRUE),
+    `L Midrange` = mean(league_avg_epx_gam[zone_l_midrange], na.rm = TRUE),
+    `R Midrange` = mean(league_avg_epx_gam[zone_r_midrange], na.rm = TRUE),
+    `Parking Lot` = mean(league_avg_epx_gam[zone_parking_lot], na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "Zone", values_to = "League AVG EPx")
+
+team_summary_long <- comparison_data_with_zones %>%
+  filter(defensive_team_name %in% c("Houston", "Milwaukee", "Dallas")) %>%
+  mutate(Zone = case_when(
+    zone_rim ~ "Rim",
+    zone_l_corner_3 ~ "L Corner 3",
+    zone_r_corner_3 ~ "R Corner 3",
+    zone_l_wing_3 ~ "L Wing 3",
+    zone_r_wing_3 ~ "R Wing 3",
+    zone_l_midrange ~ "L Midrange",
+    zone_r_midrange ~ "R Midrange",
+    zone_parking_lot ~ "Parking Lot"
+  )) %>%
+  filter(!is.na(Zone)) %>%
+  group_by(defensive_team_name, Zone) %>%
+  summarize(
+    Team_EPx = mean(team_predicted_epx, na.rm = TRUE),
+    EPx_Saving = mean(-epx_diff, na.rm = TRUE) 
+  ) %>%
+  ungroup()
+
+team_epx_wide <- team_summary_long %>%
+  select(defensive_team_name, Zone, Team_EPx) %>%
+  pivot_wider(names_from = defensive_team_name, values_from = Team_EPx)
+
+team_diff_wide <- team_summary_long %>%
+  select(defensive_team_name, Zone, EPx_Saving) %>%
+  pivot_wider(names_from = defensive_team_name, values_from = EPx_Saving)
+
+final_table <- league_summary %>%
+  left_join(team_epx_wide, by = "Zone") %>%
+  left_join(team_diff_wide, by = "Zone") %>%
+  mutate(Zone = factor(Zone, levels = c("Rim", "L Corner 3","R Corner 3", "L Wing 3", "R Wing 3", "L Midrange", "R Midrange", "Parking Lot"))) %>%
+  arrange(Zone) %>%
+  mutate(
+    Dallas_Diff = cell_spec(format(round(-Dallas.y, 3), nsmall = 3), "html", 
+                            color = ifelse(Dallas.y > 0.001, "lightgreen", ifelse(Dallas.y < -0.001, "lightcoral", "black"))),
+    Houston_Diff = cell_spec(format(round(-Houston.y, 3), nsmall = 3), "html", 
+                             color = ifelse(Houston.y > 0.001, "lightgreen", ifelse(Houston.y < -0.001, "lightcoral", "black"))),
+    Milwaukee_Diff = cell_spec(format(round(-Milwaukee.y, 3), nsmall = 3), "html", 
+                               color = ifelse(Milwaukee.y > 0.001, "lightgreen", ifelse(Milwaukee.y < -0.001, "lightcoral", "black")))
+  ) %>%
+  select(
+    Zone, 
+    `League Avg EPx` = `League AVG EPx`,
+    `Dallas EPx` = `Dallas.x`,
+    `Δ DAL` = `Dallas_Diff`,
+    `Houston EPx` = `Houston.x`,
+    `Δ HOU` = `Houston_Diff`,
+    `Milwaukee EPx` = `Milwaukee.x`,
+    `Δ MIL` = `Milwaukee_Diff`
+  )
+
+knitr::kable(
+  final_table,
+  "html",
+  escape = FALSE,
+  digits = 3,
+  caption = "Team EPx vs. League Average by Zone in 2023-24 (ΔTeam = Team EPx - League EPx)"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), full_width = T, 
+                font_size = 21.99)
+```
+
+## (Compare with Comparison Heatmaps)
+
+```{r}
+#| label: plot-team-difference-charts2
+#| fig-height: 5
+#| fig-width: 12.01
+#| layout-ncol: 1
+
+teams_to_show <- c("Houston", "Milwaukee", "Dallas")
+
+ggplot(comparison_data %>% filter(defensive_team_name %in% teams_to_show), 
+       aes(x = y_coord, y = x_coord_abs)) +
+  geom_raster(aes(fill = epx_diff)) +
+  scale_fill_gradient2(
+    name = "EPx vs. Avg",
+    low = "blue",          
+    mid = "white",       
+    high = "red",          
+    midpoint = 0.001
+  ) +
+  coord_cartesian(xlim = c(-25, 25), ylim = c(0, 47), expand = FALSE) +
+  court_landmarks +
+  facet_wrap(~ defensive_team_name, ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Comparison GAMs (Team EPx - League EPx) for Dallas, Houston, and Milwaukee in 2023-24",
+    x = "Distance from Centerline (ft)",
+    y = "Distance from Half-court (ft)"
+  ) +
+  theme(
+    axis.text = element_text(size = 6),
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold", size = 10),
+    legend.position = "bottom"
+  )
+```
+ ([**Red**]{style="color:lightcoral"} = Vulnerable Area, [**Blue**]{style="color:lightblue"} = Strong Area.)
+ 
+## Corner 3 Defense Scatter Plot
+ 
+```{r}
+#| label: plot-corner-scatter-swapped
+#| fig-cap: "Comparison of 2023-24 Zonal EPx on Left vs. Right Corner 3s"
+#| fig-height: 8
+
+library(ggrepel)
+
+# 1. Calculate League Averages for Reference Lines
+league_avg_l_corner <- mean(pred_grid_with_league_avg_zones$league_avg_epx_gam[pred_grid_with_league_avg_zones$zone_l_corner_3], na.rm = TRUE)
+league_avg_r_corner <- mean(pred_grid_with_league_avg_zones$league_avg_epx_gam[pred_grid_with_league_avg_zones$zone_r_corner_3], na.rm = TRUE)
+
+# 2. Calculate Team Averages
+team_l_corner <- comparison_data_with_zones %>%
+  filter(zone_l_corner_3) %>%
+  group_by(defensive_team_name) %>%
+  summarize(l_corner_epx = mean(team_predicted_epx, na.rm = TRUE))
+
+team_r_corner <- comparison_data_with_zones %>%
+  filter(zone_r_corner_3) %>%
+  group_by(defensive_team_name) %>%
+  summarize(r_corner_epx = mean(team_predicted_epx, na.rm = TRUE))
+
+# Join and Assign Colors based on Quadrant
+team_scatter_data <- left_join(team_l_corner, team_r_corner, by = "defensive_team_name") %>%
+  mutate(
+    color_group = case_when(
+      l_corner_epx < league_avg_l_corner & r_corner_epx < league_avg_r_corner ~ "Good", # Bottom Left
+      l_corner_epx > league_avg_l_corner & r_corner_epx > league_avg_r_corner ~ "Bad",  # Top Right
+      TRUE ~ "Mixed" # Other two quadrants
+    )
+  )
+
+# 3. Create the Plot (Swapped Axes: x = r_corner, y = l_corner)
+ggplot(team_scatter_data, aes(x = r_corner_epx, y = l_corner_epx, label = defensive_team_name)) +
+  
+  # Reference Lines
+  geom_vline(xintercept = league_avg_r_corner, color = "black", linetype = "dashed") +
+  geom_hline(yintercept = league_avg_l_corner, color = "black", linetype = "dashed") +
+  
+  # League Average Annotations (Swapped Coordinates)
+  annotate("text", x = league_avg_r_corner, y = max(team_scatter_data$l_corner_epx), 
+           label = paste0("League Avg: ", round(league_avg_r_corner, 3)), 
+           angle = 90, vjust = -0.5, hjust = 1, color = "gray30", size = 3.5) +
+  
+  annotate("text", x = max(team_scatter_data$r_corner_epx), y = league_avg_l_corner, 
+           label = paste0("League Avg: ", round(league_avg_l_corner, 3)), 
+           vjust = -0.5, hjust = 1, color = "gray30", size = 3.5) +
+
+  # Quadrant Labels
+  # Top Right: High EPx (Bad) on both
+  annotate("text", x = max(team_scatter_data$r_corner_epx), y = max(team_scatter_data$l_corner_epx), 
+           label = "Worse than Avg Both", color = "lightcoral", fontface = "bold", hjust = 1, vjust = 1.5) +
+  
+  # Bottom Left: Low EPx (Good) on both
+  annotate("text", x = min(team_scatter_data$r_corner_epx), y = min(team_scatter_data$l_corner_epx), 
+           label = "Better than Avg Both", color = "forestgreen", fontface = "bold", hjust = 0, vjust = 0) +
+  
+  # Top Left: Low Right EPx (Good), High Left EPx (Bad) -> Above Avg Right Corner
+  annotate("text", x = min(team_scatter_data$r_corner_epx), y = max(team_scatter_data$l_corner_epx), 
+           label = "Better Right, Worse Left", color = "grey50", fontface = "bold", hjust = 0, vjust = 1) +
+  
+  # Bottom Right: High Right EPx (Bad), Low Left EPx (Good) -> Above Avg Left Corner
+  annotate("text", x = max(team_scatter_data$r_corner_epx), y = min(team_scatter_data$l_corner_epx), 
+           label = "Better Left, Worse Right", color = "grey50", fontface = "bold", hjust = 1, vjust = 0) +
+  
+  # The Points with Custom Colors
+  geom_point(aes(color = color_group), size = 3, alpha = 0.8) +
+  scale_color_manual(values = c("Good" = "forestgreen", "Bad" = "firebrick", "Mixed" = "dodgerblue")) +
+  
+  # Repel Labels
+  geom_text_repel(
+    size = 3, 
+    max.overlaps = Inf,
+    box.padding = 0.4
+  ) +
+  
+  # Formatting
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  labs(
+    title = "Defensive Performance: Right vs. Left Corner 3s",
+    subtitle = "Lower EPx = Better Defense",
+    x = "Right Corner 3 EPx",
+    y = "Left Corner 3 EPx"
+  )
+```
+
+
+## Final Thoughts
+
+. . . 
+
+::::: {.columns}
+
+:::: {.column width="50%"}
+
+
+### How Teams Can Use EPx Today:
+
+-  **Opponent Scouting**
+
+-  **Self-Scouting**
+
+-  **Player Evaluation**
+
+::::
+
+:::: {.column width="50%"}
+
+
+### Current Limitations:
+
+- **Defender Context**
+
+- **Game State**
+
+- **Foul/Possession Data**
+::::
+
+:::::
+
+. . . 
+
+### Future Steps:
+
+1.  **Incorporate Tracking/Possession Data**
+2.  **Player-Level Analysis**
+    
+# Thank you for listening! Questions?

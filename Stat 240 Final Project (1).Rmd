@@ -1,0 +1,81 @@
+---
+title: "Comparison of Birth Rates Final Project-Stat 240"
+output: html_document
+date: "2024-07-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+birth = read_csv("https://opendata.hawaii.gov/dataset/1793f4bc-ee30-4392-9495-1ae1cdf1f609/resource/9378d788-2656-4678-9a5c-04ee61c94632/download/birth-rate-state-of-hawaii-1900-2011-csv.csv")
+```
+## Kayla, Paddy, Lindsey
+
+
+## Introduction
+Over the past century and even more in the past decades the birth rate of different countries has always been a topic of interest. As the environment has shown a decline, humans have been deducted as a cause to this. Birth rate has also been important in exploration of this topic as in many countries the birth rate has been increasing, while in others it is decreasing. Both can be seen as issues. This being said this report looks at the state of Hawaii to see the difference in their birth rate from the early 1900s to the early 2000s. The question that will explore this difference is how have birth rates changed in Hawaii from the early 1900s to the early 2000s? The birth rate in Hawaii will slightly increase throughout the years starting in the early 1900s to then the 2000s.
+
+## Background
+The data set used in this project is birth rates per 1000 people in Hawaii every year from 1900 to 2011. It was collected by Hawaii Department of Health. There are two variables in this data set year, which describes the year in which the data was collected, and birth rate per 1000 people, which indicated how many babies were born in the specific year. The source this data was obtained from was data.gov, which gives public government data. To fully understand this data set it is important to know that the birth rate can be an important indicator of population growth. This being said this dataset can help see the change in population or the change in birth rate for a state (Hawaii). When looking at birth rates throughout many years there may be outliers. This could be because of a health crisis, policy change, or other factor. For the rest of this report, the data of birth rates will be analyzed to show what kind of trend there has been throughout the years. We then will determine what this data means in relation to our thesis.
+
+## Analysis:
+
+## Numerical Summaries
+The numerical summary provides a general overview of the birth rates in Hawaii over the specified period. Key statistics include the mean, median, and standard deviation, which give us insights into the central tendency and variability of the birth rates.
+
+```{r}
+numeral_stats <- birth %>%
+  summarise(
+    mean_rate = mean(`Rate Per 1000 Resident Population`, na.rm = TRUE),
+    median_rate = median(`Rate Per 1000 Resident Population`, na.rm = TRUE),
+    sd_rate = sd(`Rate Per 1000 Resident Population`, na.rm = TRUE),
+    min_year = min(Year),
+    max_year = max(Year)
+  )
+numeral_stats
+```
+
+
+## Graphic summaries
+
+We'll create a time series plot to visualize the trend of birth rates over the years.
+
+```{r}
+ggplot(birth, aes(x = Year, y = `Rate Per 1000 Resident Population`)) +
+  geom_line(color = "blue") +
+  geom_point(color = "red") +
+  geom_vline(xintercept = c(1918, 1945, 1954), linetype = "dashed", color = "black") +
+  geom_point(data = subset(birth, Year == 1924), aes(x = Year, y = `Rate Per 1000 Resident Population`), 
+             color = "red", shape = 5, size = 4) +
+  labs(title = "Birth Rates in Hawaii (1900-2011)",
+       x = "Year",
+       y = "Birth Rate per 1000 Resident Population") +
+  theme_minimal()
+```
+
+## Graphical Analysis
+
+Hawaii became a territory of the United States in 1889 11 years earlier then we have data for, but the explosion in births began in the 1910s. The peaks in the graph follow trends which coincide with huge baby booms that were also witnessed by the mainland United States in 1918 following WW1, 1945 following WW2. In 1954, the Baby boom peaked which is also marked in the graph. The highest birth rate occurred in 1924 at the height of the roaring 20's, strangely occurring in the same year as one of the worst disasters in the states history when a lava flow took out several villages without warning. Additionally, A significant drop off occurred following Black Thursday in 1924 which kicked off the great depression.
+
+## Linear Model
+The linear model helps us understand the overall trend of birth rates over the years. We will look at the summary of the linear model to understand the significance and the nature of the trend.
+
+```{r}
+linear_model <- lm(`Rate Per 1000 Resident Population` ~ Year, data = birth)
+
+# Plot with trend line
+ggplot(birth, aes(x = Year, y =`Rate Per 1000 Resident Population`)) +
+  geom_line(color = "blue") +
+  geom_point(color = "red") +
+  geom_smooth(method = "lm", color = "green", se = TRUE) +
+  labs(title = "Trend of Birth Rates in Hawaii (1900-2011)",
+       x = "Year",
+       y = "Birth Rate per 1000 Resident Population") +
+  theme_minimal()
+
+summary(linear_model)
+```
+
+## Discussion
+By looking at our analysis we can see that the mean rate of 22.7 and median rate of 21.0 provide a central value around which the birth rates are distributed, and the standard deviation of 7.56 shows us the variability of these rates over the years. Our visual representation helps show the noticeable variability of decreasing and increasing trends in the birth rates over time. The trend line show that the birth rates in Hawaii have generally decreased over the period. Some potential shortcomings of the analysis are the facts that the data may not be fully complete data every year. Another shortcoming of the data could come from confounding variables like economic conditions which are not accounted for in the data set. A future direction we could look into for additional work is comparing Hawaii's birth rates with the birth rate of other states. New questions we could look into are how does advancements in healthcare play in changing birth rates? How does Hawaii's changing population effect the birth rate trends? New data we could collect to refine understanding is data on the healthcare access and quality, also data on the population of Hawaii. Our findings conclude that the birth rate in Hawaii has decreased from 1900 to 2011 which is not what we had hypothesized.
+
