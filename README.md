@@ -1,7 +1,9 @@
 # Academic Projects — Paddy Lavin
 
 ## About
+
 A collection of data science and statistics projects completed as part of the Data Science B.S. curriculum at the University of Wisconsin-Madison, spanning sports analytics, machine learning, and demographic analysis. Tools and languages used across projects include R, Python, Quarto, and various statistical and machine learning libraries.
+
 ---
 
 ## Projects
