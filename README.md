@@ -11,7 +11,7 @@ A collection of data science and statistics projects completed as part of the Da
 ### 🏀 Modeling Spatial Expected Points Allowed by NBA Defenses
 **Files:** `479proj1_finalprez_rjs.qmd` · `Modeling Spatial Expected Points Allowed by NBA Defenses.pdf`
 
-A spatial modeling project analyzing NBA defensive performance by estimating expected points allowed based on shot location and defensive positioning. The findings were presented to the UW-Madison Athletic, Statistics, and Mathematics departments. The `.qmd` file contains the full analysis code, and the `.pdf` is the slide deck from the presentation.
+A spatial modeling project analyzing NBA defensive performance by estimating expected points allowed based on shot location and defensive positioning. The findings were presented to the UW-Madison Athletic, Statistics, and Mathematics departments as a part of the UW-Madison Sports Buisness Conference. The `.qmd` file contains the full analysis code, and the `.pdf` is the slide deck from the presentation.
 
 ---
 
