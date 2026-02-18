@@ -1,7 +1,7 @@
 # Academic Projects — Paddy Lavin
 
-A collection of data science and statistics projects completed at the University of Wisconsin-Madison, spanning sports analytics, machine learning, and demographic analysis.
-
+## About
+A collection of data science and statistics projects completed as part of the Data Science B.S. curriculum at the University of Wisconsin-Madison, spanning sports analytics, machine learning, and demographic analysis. Tools and languages used across projects include R, Python, Quarto, and various statistical and machine learning libraries.
 ---
 
 ## Projects
@@ -37,6 +37,3 @@ Using NFL Big Data Bowl player-tracking data, this project models catch probabil
 An exploratory statistical analysis of birth rate trends in Hawaii over the past century using data collected by the Hawaii Department of Health (sourced from data.gov). The project examines how birth rates per 1,000 people shifted from the early 1900s to the early 2000s, accounting for potential outliers caused by health crises or policy changes. Findings suggest a slight overall increase in birth rates across the period studied.
 
 ---
-
-## About
-These projects were completed as part of the Data Science B.S. curriculum at UW-Madison. Tools and languages used across projects include R, Python, Quarto, and various statistical and machine learning libraries.
